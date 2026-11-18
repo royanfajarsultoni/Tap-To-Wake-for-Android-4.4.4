@@ -264,8 +264,8 @@ public class WakeService extends Service implements SensorEventListener,
         PendingIntent open = PendingIntent.getActivity(this, 0,
                 new Intent(this, MainActivity.class), PendingIntent.FLAG_UPDATE_CURRENT);
         Notification.Builder b = new Notification.Builder(this)
-                .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-                .setContentTitle("Tap to Wake aktif")
+                .setSmallIcon(R.drawable.ic_stat_wake)
+                .setContentTitle("TAP//WAKE aktif")
                 .setContentText("Ketuk 2x atau lambai 2x untuk menyalakan layar")
                 .setContentIntent(open)
                 .setOngoing(true)

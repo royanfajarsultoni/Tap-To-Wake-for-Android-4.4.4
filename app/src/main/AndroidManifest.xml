@@ -7,9 +7,9 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@android:drawable/sym_def_app_icon"
-        android:label="Tap to Wake"
-        android:theme="@android:style/Theme.Holo.Light">
+        android:icon="@mipmap/ic_launcher"
+        android:label="TAP//WAKE"
+        android:theme="@android:style/Theme.Holo.NoActionBar">
 
         <activity
             android:name=".MainActivity"

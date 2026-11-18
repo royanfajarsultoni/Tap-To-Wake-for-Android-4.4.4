@@ -2,6 +2,7 @@ package com.royan.taptowake;
 
 import android.content.Context;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -47,15 +48,17 @@ final class OverlayController {
     }
 
     @SuppressWarnings("deprecation")
-    private TextView button(String text, int colorArgb) {
+    private TextView button(String text, int accentArgb) {
         TextView t = new TextView(ctx);
         t.setText(text);
-        t.setTextColor(0xFFFFFFFF);
-        t.setTextSize(13f);
+        t.setTextColor(accentArgb);
+        t.setTextSize(12f);
+        t.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         t.setGravity(Gravity.CENTER);
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
-        g.setColor(colorArgb);
+        g.setColor(0xE6070B10);
+        g.setStroke(dp(2), accentArgb);
         t.setBackgroundDrawable(g);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(dp(46), dp(46));
         p.leftMargin = dp(4);
@@ -70,28 +73,28 @@ final class OverlayController {
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setAlpha(0.85f);
 
-        TextView bubble = button("•••", 0xFF37474F);
+        TextView bubble = button("///", UiKit.CYAN);
         root.addView(bubble);
 
         panel = new LinearLayout(ctx);
         panel.setOrientation(LinearLayout.HORIZONTAL);
         panel.setVisibility(View.GONE);
 
-        TextView volUp = button("V+", 0xFF2E7D32);
+        TextView volUp = button("V+", UiKit.CYAN);
         volUp.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 actions.onVolumeUp();
             }
         });
-        TextView volDown = button("V-", 0xFF1565C0);
+        TextView volDown = button("V-", UiKit.CYAN);
         volDown.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 actions.onVolumeDown();
             }
         });
-        TextView lock = button("OFF", 0xFFC62828);
+        TextView lock = button("OFF", UiKit.MAGENTA);
         lock.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {

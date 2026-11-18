@@ -4,21 +4,22 @@ import android.app.Activity;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.graphics.drawable.ColorDrawable;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.text.Html;
+import android.view.Gravity;
 import android.view.View;
-import android.widget.Button;
-import android.widget.CheckBox;
-import android.widget.CompoundButton;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
-/** Layar pengaturan sederhana. Seluruh UI dibuat lewat kode (tanpa file layout). */
+/** Layar pengaturan bertema cyberpunk. Seluruh UI dibuat lewat kode (tanpa file layout). */
 public class MainActivity extends Activity implements SensorEventListener, KnockDetector.Listener {
 
     private Prefs prefs;
@@ -42,6 +43,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         accel = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         testDetector = new KnockDetector(this);
         testDetector.setSensitivity(prefs.sensitivity());
+        getWindow().setBackgroundDrawable(new ColorDrawable(UiKit.BG));
         buildUi();
         if (prefs.enabled()) startService(new Intent(this, WakeService.class));
     }
@@ -62,32 +64,8 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
 
     // ------------------------------------------------------------------- UI
 
-    private int dp(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
-    }
-
-    private TextView text(String s, float sizeSp, boolean bold) {
-        TextView t = new TextView(this);
-        t.setText(s);
-        t.setTextSize(sizeSp);
-        if (bold) t.setTypeface(null, android.graphics.Typeface.BOLD);
-        t.setPadding(0, dp(6), 0, dp(6));
-        return t;
-    }
-
-    private CheckBox check(String label, boolean value, final String key) {
-        CheckBox c = new CheckBox(this);
-        c.setText(label);
-        c.setChecked(value);
-        c.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton v, boolean on) {
-                prefs.setBool(key, on);
-                notifyService();
-            }
-        });
-        content.addView(c);
-        return c;
+    private int dp(float v) {
+        return UiKit.dp(this, v);
     }
 
     private void notifyService() {
@@ -96,41 +74,98 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         }
     }
 
+    private void addToggle(LinearLayout parent, String label, boolean value, final String key) {
+        parent.addView(new ToggleRow(this, label, value, new ToggleRow.OnChange() {
+            @Override
+            public void onChange(boolean on) {
+                prefs.setBool(key, on);
+                notifyService();
+            }
+        }));
+    }
+
+    private TextView note(String s) {
+        TextView t = UiKit.label(this, s, 12f, UiKit.DIM, false);
+        t.setPadding(0, dp(4), 0, dp(2));
+        return t;
+    }
+
     private void buildUi() {
+        FrameLayout root = new FrameLayout(this);
+        UiKit.setBg(root, new UiKit.GridBackground(this));
+
         ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(12), dp(16), dp(24));
+        content.setPadding(dp(16), dp(20), dp(16), dp(28));
         sv.addView(content);
+        root.addView(sv, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
-        content.addView(text("Tap to Wake", 22f, true));
-        content.addView(text("Pengganti tombol Power & Volume yang rusak.", 14f, false));
+        buildHeader();
+        buildServiceCard();
+        buildWakeCard();
+        buildControlCard();
+        buildTipsCard();
 
-        CheckBox enabled = new CheckBox(this);
-        enabled.setText("Layanan aktif (wajib agar semua fitur jalan)");
-        enabled.setChecked(prefs.enabled());
-        enabled.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton v, boolean on) {
-                prefs.setBool(Prefs.K_ENABLED, on);
-                Intent svc = new Intent(MainActivity.this, WakeService.class);
-                if (on) startService(svc);
-                else stopService(svc);
-            }
-        });
-        content.addView(enabled);
+        setContentView(root);
+    }
 
-        content.addView(text("Menyalakan layar", 16f, true));
-        check("Ketuk 2x pada HP (accelerometer)", prefs.knock(), Prefs.K_KNOCK);
-        check("Lambai 2x di atas sensor jarak (paling andal)", prefs.wave(), Prefs.K_WAVE);
-        check("Abaikan ketukan bila sensor jarak tertutup (anti nyala di saku)",
-                prefs.pocketGuard(), Prefs.K_POCKET);
+    private void buildHeader() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.BOTTOM);
 
-        sensLabel = text("", 14f, false);
-        content.addView(sensLabel);
+        TextView title = UiKit.label(this, "TAP//WAKE", 30f, UiKit.CYAN, true);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        TextView ver = UiKit.label(this, "v1.1", 12f, UiKit.MAGENTA, true);
+        row.addView(title);
+        row.addView(ver);
+        content.addView(row);
+
+        TextView by = UiKit.label(this, "", 13f, UiKit.TEXT, false);
+        by.setText(Html.fromHtml("by <b><font color='#FF2E88'>ROYAN</font></b>"
+                + "<font color='#6F8C99'>&nbsp;&nbsp;//&nbsp;&nbsp;power &amp; volume substitute</font>"));
+        by.setPadding(0, dp(2), 0, 0);
+        content.addView(by);
+        content.addView(UiKit.divider(this, UiKit.CYAN));
+    }
+
+    private void buildServiceCard() {
+        LinearLayout card = UiKit.card(this, "SYSTEM");
+        card.addView(new ToggleRow(this, "Layanan aktif", prefs.enabled(),
+                new ToggleRow.OnChange() {
+                    @Override
+                    public void onChange(boolean on) {
+                        prefs.setBool(Prefs.K_ENABLED, on);
+                        Intent svc = new Intent(MainActivity.this, WakeService.class);
+                        if (on) {
+                            startService(svc);
+                        } else {
+                            stopService(svc);
+                        }
+                    }
+                }));
+        card.addView(note("Wajib aktif agar semua fitur berjalan."));
+        content.addView(card);
+    }
+
+    private void buildWakeCard() {
+        LinearLayout card = UiKit.card(this, "WAKE_TRIGGER");
+        addToggle(card, "Ketuk 2x pada HP", prefs.knock(), Prefs.K_KNOCK);
+        addToggle(card, "Lambai 2x di sensor jarak", prefs.wave(), Prefs.K_WAVE);
+        addToggle(card, "Anti nyala di saku", prefs.pocketGuard(), Prefs.K_POCKET);
+        card.addView(note("Anti nyala: ketukan diabaikan saat sensor jarak tertutup."));
+
+        sensLabel = UiKit.label(this, "", 13f, UiKit.TEXT, true);
+        sensLabel.setPadding(0, dp(12), 0, 0);
+        card.addView(sensLabel);
         SeekBar sens = new SeekBar(this);
         sens.setMax(100);
         sens.setProgress(prefs.sensitivity());
+        UiKit.styleSeek(this, sens);
         updateSensLabel(prefs.sensitivity());
         sens.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -149,73 +184,83 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
                 notifyService();
             }
         });
-        content.addView(sens);
+        card.addView(sens);
 
-        testView = text("", 14f, false);
-        content.addView(text("Uji ketukan (layar harus menyala, ketuk 2x pada HP):", 14f, true));
-        content.addView(testView);
+        LinearLayout box = UiKit.inset(this);
+        box.addView(UiKit.label(this, "SENSOR_TEST", 11f, UiKit.DIM, true));
+        testView = UiKit.label(this, "", 14f, UiKit.CYAN, true);
+        testView.setPadding(0, dp(4), 0, dp(2));
+        box.addView(testView);
+        box.addView(note("Layar menyala, ketuk 2x pada HP. Naikkan sensitivitas bila TAP tetap 0."));
+        card.addView(box);
         updateTestView();
 
-        content.addView(text("Pengganti tombol", 16f, true));
-        check("Tampilkan tombol melayang (V+, V-, OFF)", prefs.bubble(), Prefs.K_BUBBLE);
-        content.addView(text("Tombol OFF mengunci layar dan butuh Device Admin. "
-                + "Aksi Kunci / Vol+ / Vol- juga ada di notifikasi.", 13f, false));
+        content.addView(card);
+    }
 
-        adminView = text("", 14f, false);
-        content.addView(adminView);
-        Button adminOn = new Button(this);
-        adminOn.setText("Aktifkan Device Admin");
-        adminOn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                Intent i = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
-                i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN,
-                        new ComponentName(MainActivity.this, AdminReceiver.class));
-                i.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                        "Hanya dipakai untuk mengunci layar (pengganti tombol Power).");
-                startActivity(i);
-            }
-        });
-        content.addView(adminOn);
-        Button adminOff = new Button(this);
-        adminOff.setText("Nonaktifkan Device Admin (sebelum uninstall)");
-        adminOff.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                DevicePolicyManager dpm =
-                        (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
-                dpm.removeActiveAdmin(new ComponentName(MainActivity.this, AdminReceiver.class));
-                refreshAdminStatus();
-            }
-        });
-        content.addView(adminOff);
+    private void buildControlCard() {
+        LinearLayout card = UiKit.card(this, "CONTROL");
+        addToggle(card, "Tombol melayang", prefs.bubble(), Prefs.K_BUBBLE);
+        card.addView(note("V+ / V- untuk volume, OFF untuk kunci layar. "
+                + "Aksi yang sama ada di notifikasi."));
 
-        content.addView(text("Agar tidak dimatikan sistem (MIUI)", 16f, true));
-        content.addView(text(
-                "1. Keamanan > Izin > Autostart: izinkan Tap to Wake.\n"
-                        + "2. Buka daftar Recent Apps, kunci kartu Tap to Wake (tarik / tekan lama kartu).\n"
-                        + "3. Kecualikan Tap to Wake dari penghemat baterai.\n"
-                        + "4. Jika tombol melayang tidak muncul, izinkan \"jendela melayang\" untuk aplikasi ini.",
-                13f, false));
+        adminView = UiKit.label(this, "", 13f, UiKit.TEXT, true);
+        adminView.setPadding(0, dp(12), 0, 0);
+        card.addView(adminView);
 
-        setContentView(sv);
+        card.addView(UiKit.button(this, "ADMIN :: AKTIFKAN", UiKit.CYAN,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Intent i = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                        i.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN,
+                                new ComponentName(MainActivity.this, AdminReceiver.class));
+                        i.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                "Hanya dipakai untuk mengunci layar (pengganti tombol Power).");
+                        startActivity(i);
+                    }
+                }));
+        card.addView(UiKit.button(this, "ADMIN :: NONAKTIFKAN (sebelum uninstall)", UiKit.MAGENTA,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        DevicePolicyManager dpm =
+                                (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+                        dpm.removeActiveAdmin(
+                                new ComponentName(MainActivity.this, AdminReceiver.class));
+                        refreshAdminStatus();
+                    }
+                }));
+        content.addView(card);
+    }
+
+    private void buildTipsCard() {
+        LinearLayout card = UiKit.card(this, "MIUI_KEEP_ALIVE");
+        TextView t = UiKit.label(this,
+                "01  Keamanan > Izin > Autostart: izinkan Tap to Wake.\n"
+                        + "02  Recent Apps: kunci kartu Tap to Wake.\n"
+                        + "03  Kecualikan dari penghemat baterai.\n"
+                        + "04  Tombol melayang tidak muncul? Izinkan \"jendela melayang\".",
+                12f, UiKit.DIM, false);
+        t.setLineSpacing(dp(3), 1f);
+        card.addView(t);
+        content.addView(card);
     }
 
     private void updateSensLabel(int p) {
-        sensLabel.setText("Sensitivitas ketukan: " + p + "%  (naikkan bila ketukan tidak terdeteksi)");
+        sensLabel.setText("SENSITIVITAS  " + p + "%");
     }
 
     private void updateTestView() {
-        testView.setText("Ketukan terdeteksi: " + taps
-                + "  |  Ketuk ganda: " + doubles
-                + "  |  Kekuatan terakhir: " + String.format("%.1f", lastJerk));
+        testView.setText("TAP " + taps + "   DBL " + doubles
+                + "   PWR " + String.format("%.1f", lastJerk));
     }
 
     private void refreshAdminStatus() {
         DevicePolicyManager dpm = (DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
         boolean on = dpm.isAdminActive(new ComponentName(this, AdminReceiver.class));
-        adminView.setText(on ? "Device Admin: AKTIF (tombol OFF siap dipakai)"
-                : "Device Admin: belum aktif (tombol OFF belum berfungsi)");
+        adminView.setText(on ? "ADMIN :: [ AKTIF ]" : "ADMIN :: [ BELUM AKTIF ]");
+        adminView.setTextColor(on ? UiKit.CYAN : UiKit.MAGENTA);
     }
 
     // ------------------------------------------------------- sensor uji

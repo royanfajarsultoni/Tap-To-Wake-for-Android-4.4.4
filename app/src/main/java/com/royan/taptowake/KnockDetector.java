@@ -27,6 +27,7 @@ final class KnockDetector {
     private boolean waitingSecond;
     private long firstTapNs;
     private long lastFireNs;
+    private long lastSampleNs;
 
     KnockDetector(Listener listener) {
         this.listener = listener;
@@ -45,11 +46,20 @@ final class KnockDetector {
         waitingSecond = false;
     }
 
+    /**
+     * Seperti reset(), tapi nilai acuan sampel dipertahankan. Dipakai saat sensor didaftarkan
+     * ulang: kalau acuan dibuang, sampel berikutnya (yaitu ketukan pertama) ikut terbuang.
+     */
+    void softReset() {
+        waitingSecond = false;
+    }
+
     void onSample(float x, float y, float z, long tNs) {
         if (!hasLast) {
             lx = x;
             ly = y;
             lz = z;
+            lastSampleNs = tNs;
             hasLast = true;
             return;
         }
@@ -61,12 +71,20 @@ final class KnockDetector {
         lz = z;
 
         float jerk = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        // Peluruhan "tingkat gerakan" mengikuti WAKTU, bukan jumlah sampel. Sebagian sensor
+        // berhenti mengirim data saat HP diam; kalau peluruhan per sampel, nilai gerakan
+        // terakhir (mis. saat HP baru diletakkan) tertahan tinggi dan ketukan ditolak.
+        float steps = (tNs - lastSampleNs) / 20000000f;   // 1 langkah = 20 ms (sampel 50 Hz)
+        lastSampleNs = tNs;
+        if (steps < 1f) steps = 1f;
+        if (steps > 500f) steps = 500f;
+        noise = noise * (float) Math.pow(0.95, steps);
         float quiet = noise;                       // tingkat gerakan SEBELUM sampel ini
         // Getaran sisa dari ketukan pertama tidak dihitung sebagai "HP sedang digerakkan",
         // kalau tidak ketukan keras akan menolak ketukan kedua.
         boolean ringing = waitingSecond && (tNs - firstTapNs) < RING_NS;
         if (!ringing) {
-            noise = noise * 0.95f + jerk * 0.05f;
+            noise += jerk * 0.05f;
         }
 
         if (jerk < threshold || quiet > QUIET_MAX) return;

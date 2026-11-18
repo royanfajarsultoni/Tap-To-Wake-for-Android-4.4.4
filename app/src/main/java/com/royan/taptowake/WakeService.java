@@ -59,6 +59,7 @@ public class WakeService extends Service implements SensorEventListener,
     private long lastAccelMs;
     private long lastLockRefreshMs;
     private boolean pocketLogged;
+    private boolean stallHandled;
 
     private final Handler handler = new Handler();
     private final Runnable watchdog = new Runnable() {
@@ -130,7 +131,6 @@ public class WakeService extends Service implements SensorEventListener,
                     Diag.log("ALARM watchdog");
                     lastLockRefreshMs = SystemClock.elapsedRealtime();
                     refreshLock();
-                    reregisterSensors();
                     scheduleAlarm();
                 }
             }
@@ -205,6 +205,7 @@ public class WakeService extends Service implements SensorEventListener,
         lastLockRefreshMs = now;
         lastAccelMs = now;
         pocketLogged = false;
+        stallHandled = false;
         if (!cpuLock.isHeld()) cpuLock.acquire();
         knock.reset();
         wave.reset();
@@ -233,9 +234,11 @@ public class WakeService extends Service implements SensorEventListener,
             lastLockRefreshMs = now;
             refreshLock();
         }
-        if (wantAccel() && now - lastAccelMs > STALL_MS) {
+        // Satu kali per episode diam: sebagian sensor memang berhenti mengirim data saat HP diam.
+        if (wantAccel() && !stallHandled && now - lastAccelMs > STALL_MS) {
             Diag.log("ACCEL macet " + (now - lastAccelMs) + "ms -> daftar ulang");
             Diag.restarts++;
+            stallHandled = true;
             reregisterSensors();
         }
     }
@@ -253,9 +256,8 @@ public class WakeService extends Service implements SensorEventListener,
 
     private void reregisterSensors() {
         sm.unregisterListener(this);
-        knock.reset();
+        knock.softReset();   // nilai acuan dipertahankan, supaya ketukan pertama tidak terbuang
         wave.reset();
-        lastAccelMs = SystemClock.elapsedRealtime();
         registerSensors();
     }
 
@@ -281,6 +283,11 @@ public class WakeService extends Service implements SensorEventListener,
         int type = e.sensor.getType();
         if (type == Sensor.TYPE_ACCELEROMETER) {
             long now = SystemClock.elapsedRealtime();
+            long gap = now - lastAccelMs;
+            if (gap > 2000L) {
+                Diag.log("ACCEL lanjut setelah diam " + gap + "ms");
+            }
+            stallHandled = false;
             lastAccelMs = now;
             Diag.lastAccelMs = now;
             Diag.accelCount++;
@@ -310,6 +317,7 @@ public class WakeService extends Service implements SensorEventListener,
 
     @Override
     public void onTap(float jerk) {
+        Diag.log("TAP kekuatan " + String.format("%.1f", jerk));
     }
 
     @Override

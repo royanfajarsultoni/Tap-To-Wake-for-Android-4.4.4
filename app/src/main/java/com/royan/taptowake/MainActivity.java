@@ -124,7 +124,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         TextView title = UiKit.label(this, "TAP//WAKE", 30f, UiKit.CYAN, true);
         title.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView ver = UiKit.label(this, "v1.1.1", 12f, UiKit.MAGENTA, true);
+        TextView ver = UiKit.label(this, "v1.1.2", 12f, UiKit.MAGENTA, true);
         row.addView(title);
         row.addView(ver);
         content.addView(row);
@@ -260,6 +260,18 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
                     @Override
                     public void onClick(View v) {
                         refreshDiag();
+                    }
+                }));
+        card.addView(UiKit.button(this, "DIAG :: SALIN LOG", UiKit.MAGENTA,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                                getSystemService(CLIPBOARD_SERVICE);
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                                "taptowake", diagView.getText() + "\n" + Diag.tail(80)));
+                        android.widget.Toast.makeText(MainActivity.this,
+                                "Log disalin. Tempel ke chat.", android.widget.Toast.LENGTH_SHORT).show();
                     }
                 }));
         content.addView(card);

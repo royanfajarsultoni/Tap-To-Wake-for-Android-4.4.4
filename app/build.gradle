@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.royan.taptowake'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.royan.taptowake'
+        minSdk 19      // Android 4.4 KitKat
+        targetSdk 19   // sengaja 19: perilaku izin KitKat, tanpa runtime permission
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

@@ -36,14 +36,13 @@ public class WakeService extends Service implements SensorEventListener,
     static final String ACTION_VOL_UP = "com.royan.taptowake.VOL_UP";
     static final String ACTION_VOL_DOWN = "com.royan.taptowake.VOL_DOWN";
     static final String ACTION_RELOAD = "com.royan.taptowake.RELOAD";
-    static final String ACTION_WATCHDOG = "com.royan.taptowake.WATCHDOG";
 
     private static final int NOTIF_ID = 1;
     private static final long WARMUP_MS = 700L;
-    private static final long WATCHDOG_MS = 3000L;       // pemeriksaan kesehatan tiap 3 dtk
-    private static final long STALL_MS = 4000L;          // tanpa data accelerometer selama ini = macet
-    private static final long LOCK_REFRESH_MS = 10000L;  // wake lock diperbarui tiap 10 dtk
-    private static final long ALARM_MS = 20000L;         // alarm pembangun tiap 20 dtk
+    private static final long WATCHDOG_MS = 1000L;       // pemeriksaan kesehatan tiap 1 dtk
+    private static final long STALL_MS = 2000L;          // tanpa data accelerometer selama ini = macet
+    private static final long REARM_MS = 150L;           // sampel pertama setelah daftar ulang dibuang
+    private static final long RETRY_MS = 5000L;          // jeda coba lagi bila aliran belum hidup
 
     private Prefs prefs;
     private PowerManager pm;
@@ -57,7 +56,8 @@ public class WakeService extends Service implements SensorEventListener,
     private boolean listening;
     private long ignoreUntil;
     private long lastAccelMs;
-    private long lastLockRefreshMs;
+    private long lastRegisterMs;
+    private long aliveSpanMs;   // berapa lama aliran data biasanya hidup sebelum macet
     private boolean pocketLogged;
     private boolean stallHandled;
 
@@ -126,13 +126,6 @@ public class WakeService extends Service implements SensorEventListener,
                 onVolumeDown();
             } else if (ACTION_RELOAD.equals(a)) {
                 applyPrefs();
-            } else if (ACTION_WATCHDOG.equals(a)) {
-                if (listening) {
-                    Diag.log("ALARM watchdog");
-                    lastLockRefreshMs = SystemClock.elapsedRealtime();
-                    refreshLock();
-                    scheduleAlarm();
-                }
             }
         }
         return START_STICKY;
@@ -202,7 +195,7 @@ public class WakeService extends Service implements SensorEventListener,
         listening = true;
         Diag.listening = true;
         long now = SystemClock.elapsedRealtime();
-        lastLockRefreshMs = now;
+        lastRegisterMs = now;
         lastAccelMs = now;
         pocketLogged = false;
         stallHandled = false;
@@ -212,7 +205,6 @@ public class WakeService extends Service implements SensorEventListener,
         ignoreUntil = now + WARMUP_MS;
         registerSensors();
         handler.postDelayed(watchdog, WATCHDOG_MS);
-        scheduleAlarm();
         Diag.log("LISTEN start accel=" + wantAccel() + " prox=" + wantProx());
     }
 
@@ -221,61 +213,50 @@ public class WakeService extends Service implements SensorEventListener,
         listening = false;
         Diag.listening = false;
         handler.removeCallbacks(watchdog);
-        cancelAlarm();
         sm.unregisterListener(this);
         if (cpuLock.isHeld()) cpuLock.release();
         Diag.log("LISTEN stop");
     }
 
-    /** Memastikan wake lock dan aliran sensor masih hidup. */
+    /** Memastikan wake lock tetap dipegang dan aliran data accelerometer tetap hidup. */
     private void checkHealth() {
         long now = SystemClock.elapsedRealtime();
-        if (now - lastLockRefreshMs >= LOCK_REFRESH_MS) {
-            lastLockRefreshMs = now;
-            refreshLock();
+        if (!cpuLock.isHeld()) {
+            Diag.log("LOCK hilang -> acquire ulang");
+            Diag.lockLost++;
+            cpuLock.acquire();
         }
-        // Satu kali per episode diam: sebagian sensor memang berhenti mengirim data saat HP diam.
-        if (wantAccel() && !stallHandled && now - lastAccelMs > STALL_MS) {
-            Diag.log("ACCEL macet " + (now - lastAccelMs) + "ms -> daftar ulang");
+        if (!wantAccel()) return;
+
+        long sinceReg = now - lastRegisterMs;
+        boolean silent = now - lastAccelMs > STALL_MS;
+        if (silent && (!stallHandled || sinceReg >= RETRY_MS)) {
+            // Aliran data berhenti padahal CPU hidup. Catat berapa lama ia hidup sejak
+            // didaftarkan, lalu hidupkan lagi dengan mendaftarkan ulang sensor.
+            long alive = lastAccelMs - lastRegisterMs;
+            if (!stallHandled && alive > 1000L) aliveSpanMs = alive;
+            Diag.aliveMs = aliveSpanMs;
+            Diag.log("ACCEL macet " + (now - lastAccelMs) + "ms (hidup " + alive
+                    + "ms) -> daftar ulang");
             Diag.restarts++;
             stallHandled = true;
+            reregisterSensors();
+        } else if (!silent && aliveSpanMs > 0 && sinceReg >= aliveSpanMs * 6 / 10) {
+            // Aliran biasanya mati setelah ~aliveSpanMs: daftar ulang lebih dulu, sebelum mati.
+            Diag.periodic++;
             reregisterSensors();
         }
     }
 
-    private void refreshLock() {
-        if (!cpuLock.isHeld()) {
-            Diag.log("LOCK hilang -> acquire ulang");
-            Diag.lockLost++;
-        } else {
-            cpuLock.release();
-        }
-        cpuLock.acquire();
-        Diag.lockRefreshes++;
-    }
-
     private void reregisterSensors() {
         sm.unregisterListener(this);
-        knock.softReset();   // nilai acuan dipertahankan, supaya ketukan pertama tidak terbuang
+        knock.reset();
         wave.reset();
+        lastRegisterMs = SystemClock.elapsedRealtime();
+        // Sampel pertama setelah pendaftaran ulang nilainya palsu (terlihat sebagai "ketukan"
+        // berkekuatan ~21 di log), jadi dibuang.
+        ignoreUntil = lastRegisterMs + REARM_MS;
         registerSensors();
-    }
-
-    private PendingIntent watchdogIntent() {
-        Intent i = new Intent(this, WakeService.class).setAction(ACTION_WATCHDOG);
-        return PendingIntent.getService(this, 98, i, PendingIntent.FLAG_UPDATE_CURRENT);
-    }
-
-    /** Alarm yang membangunkan CPU bila wake lock ternyata dicabut sistem. */
-    private void scheduleAlarm() {
-        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
-        am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + ALARM_MS, watchdogIntent());
-    }
-
-    private void cancelAlarm() {
-        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
-        am.cancel(watchdogIntent());
     }
 
     @Override

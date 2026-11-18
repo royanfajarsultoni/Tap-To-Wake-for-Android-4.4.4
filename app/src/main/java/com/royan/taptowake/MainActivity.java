@@ -124,7 +124,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         TextView title = UiKit.label(this, "TAP//WAKE", 30f, UiKit.CYAN, true);
         title.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView ver = UiKit.label(this, "v1.1.2", 12f, UiKit.MAGENTA, true);
+        TextView ver = UiKit.label(this, "v1.1.3", 12f, UiKit.MAGENTA, true);
         row.addView(title);
         row.addView(ver);
         content.addView(row);
@@ -283,7 +283,8 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         diagView.setText("listening=" + Diag.listening
                 + "  accel=" + Diag.accelCount + " (terakhir " + age + " lalu)\n"
                 + "restart=" + Diag.restarts
-                + "  lockRefresh=" + Diag.lockRefreshes
+                + "  berkala=" + Diag.periodic
+                + "  hidup=" + Diag.aliveMs + "ms"
                 + "  lockHilang=" + Diag.lockLost
                 + "  blokirSaku=" + Diag.pocketBlocked + "\n"
                 + "----\n" + Diag.tail(18));

@@ -17,6 +17,8 @@ final class Diag {
     static volatile long lockRefreshes;
     static volatile long lockLost;
     static volatile long pocketBlocked;
+    static volatile long periodic;      // daftar ulang berkala sebelum aliran macet
+    static volatile long aliveMs;       // lama aliran data biasanya hidup
 
     private Diag() {
     }

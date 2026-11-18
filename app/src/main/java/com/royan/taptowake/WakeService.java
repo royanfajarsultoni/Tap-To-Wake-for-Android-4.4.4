@@ -15,6 +15,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.AudioManager;
+import android.os.Handler;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
@@ -25,6 +26,7 @@ import android.widget.Toast;
  *  - Saat layar MATI: menahan CPU tetap hidup (partial wake lock) dan mendengarkan
  *    accelerometer (ketuk 2x) / proximity (lambai 2x), lalu menyalakan layar.
  *  - Saat layar HIDUP: semua sensor dilepas supaya tidak boros baterai.
+ *  - Selama layar mati, watchdog menjaga agar wake lock dan aliran sensor tidak "mati diam-diam".
  *  - Menyediakan aksi Kunci layar / Volume + / Volume - lewat notifikasi dan tombol melayang.
  */
 public class WakeService extends Service implements SensorEventListener,
@@ -34,9 +36,14 @@ public class WakeService extends Service implements SensorEventListener,
     static final String ACTION_VOL_UP = "com.royan.taptowake.VOL_UP";
     static final String ACTION_VOL_DOWN = "com.royan.taptowake.VOL_DOWN";
     static final String ACTION_RELOAD = "com.royan.taptowake.RELOAD";
+    static final String ACTION_WATCHDOG = "com.royan.taptowake.WATCHDOG";
 
     private static final int NOTIF_ID = 1;
     private static final long WARMUP_MS = 700L;
+    private static final long WATCHDOG_MS = 3000L;       // pemeriksaan kesehatan tiap 3 dtk
+    private static final long STALL_MS = 4000L;          // tanpa data accelerometer selama ini = macet
+    private static final long LOCK_REFRESH_MS = 10000L;  // wake lock diperbarui tiap 10 dtk
+    private static final long ALARM_MS = 20000L;         // alarm pembangun tiap 20 dtk
 
     private Prefs prefs;
     private PowerManager pm;
@@ -49,14 +56,29 @@ public class WakeService extends Service implements SensorEventListener,
     private OverlayController overlay;
     private boolean listening;
     private long ignoreUntil;
+    private long lastAccelMs;
+    private long lastLockRefreshMs;
+    private boolean pocketLogged;
+
+    private final Handler handler = new Handler();
+    private final Runnable watchdog = new Runnable() {
+        @Override
+        public void run() {
+            if (!listening) return;
+            checkHealth();
+            handler.postDelayed(this, WATCHDOG_MS);
+        }
+    };
 
     private final BroadcastReceiver screenReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String a = intent.getAction();
             if (Intent.ACTION_SCREEN_OFF.equals(a)) {
+                Diag.log("SCREEN off");
                 startListening();
             } else if (Intent.ACTION_SCREEN_ON.equals(a)) {
+                Diag.log("SCREEN on");
                 stopListening();
             }
         }
@@ -65,6 +87,7 @@ public class WakeService extends Service implements SensorEventListener,
     @Override
     public void onCreate() {
         super.onCreate();
+        Diag.log("SERVICE create");
         prefs = new Prefs(this);
         pm = (PowerManager) getSystemService(POWER_SERVICE);
         sm = (SensorManager) getSystemService(SENSOR_SERVICE);
@@ -102,6 +125,14 @@ public class WakeService extends Service implements SensorEventListener,
                 onVolumeDown();
             } else if (ACTION_RELOAD.equals(a)) {
                 applyPrefs();
+            } else if (ACTION_WATCHDOG.equals(a)) {
+                if (listening) {
+                    Diag.log("ALARM watchdog");
+                    lastLockRefreshMs = SystemClock.elapsedRealtime();
+                    refreshLock();
+                    reregisterSensors();
+                    scheduleAlarm();
+                }
             }
         }
         return START_STICKY;
@@ -109,6 +140,7 @@ public class WakeService extends Service implements SensorEventListener,
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        Diag.log("TASK removed (swipe dari Recent Apps)");
         // Dibersihkan dari recent apps -> hidupkan lagi sebentar kemudian.
         Intent restart = new Intent(getApplicationContext(), WakeService.class);
         PendingIntent p = PendingIntent.getService(getApplicationContext(), 99, restart,
@@ -120,6 +152,7 @@ public class WakeService extends Service implements SensorEventListener,
 
     @Override
     public void onDestroy() {
+        Diag.log("SERVICE destroy");
         stopListening();
         try {
             unregisterReceiver(screenReceiver);
@@ -149,42 +182,124 @@ public class WakeService extends Service implements SensorEventListener,
         }
     }
 
+    private boolean wantAccel() {
+        return prefs.knock() && accel != null;
+    }
+
+    private boolean wantProx() {
+        return (prefs.wave() || prefs.pocketGuard()) && prox != null;
+    }
+
+    private void registerSensors() {
+        if (wantProx()) sm.registerListener(this, prox, SensorManager.SENSOR_DELAY_NORMAL);
+        if (wantAccel()) sm.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME);
+    }
+
     private void startListening() {
         if (listening || !prefs.enabled()) return;
-        boolean useAccel = prefs.knock() && accel != null;
-        boolean useProx = (prefs.wave() || prefs.pocketGuard()) && prox != null;
-        if (!useAccel && !useProx) return;
+        if (!wantAccel() && !wantProx()) return;
 
         listening = true;
+        Diag.listening = true;
+        long now = SystemClock.elapsedRealtime();
+        lastLockRefreshMs = now;
+        lastAccelMs = now;
+        pocketLogged = false;
         if (!cpuLock.isHeld()) cpuLock.acquire();
         knock.reset();
         wave.reset();
-        ignoreUntil = SystemClock.elapsedRealtime() + WARMUP_MS;
-        if (useProx) sm.registerListener(this, prox, SensorManager.SENSOR_DELAY_NORMAL);
-        if (useAccel) sm.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME);
+        ignoreUntil = now + WARMUP_MS;
+        registerSensors();
+        handler.postDelayed(watchdog, WATCHDOG_MS);
+        scheduleAlarm();
+        Diag.log("LISTEN start accel=" + wantAccel() + " prox=" + wantProx());
     }
 
     private void stopListening() {
         if (!listening) return;
         listening = false;
+        Diag.listening = false;
+        handler.removeCallbacks(watchdog);
+        cancelAlarm();
         sm.unregisterListener(this);
         if (cpuLock.isHeld()) cpuLock.release();
+        Diag.log("LISTEN stop");
+    }
+
+    /** Memastikan wake lock dan aliran sensor masih hidup. */
+    private void checkHealth() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastLockRefreshMs >= LOCK_REFRESH_MS) {
+            lastLockRefreshMs = now;
+            refreshLock();
+        }
+        if (wantAccel() && now - lastAccelMs > STALL_MS) {
+            Diag.log("ACCEL macet " + (now - lastAccelMs) + "ms -> daftar ulang");
+            Diag.restarts++;
+            reregisterSensors();
+        }
+    }
+
+    private void refreshLock() {
+        if (!cpuLock.isHeld()) {
+            Diag.log("LOCK hilang -> acquire ulang");
+            Diag.lockLost++;
+        } else {
+            cpuLock.release();
+        }
+        cpuLock.acquire();
+        Diag.lockRefreshes++;
+    }
+
+    private void reregisterSensors() {
+        sm.unregisterListener(this);
+        knock.reset();
+        wave.reset();
+        lastAccelMs = SystemClock.elapsedRealtime();
+        registerSensors();
+    }
+
+    private PendingIntent watchdogIntent() {
+        Intent i = new Intent(this, WakeService.class).setAction(ACTION_WATCHDOG);
+        return PendingIntent.getService(this, 98, i, PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    /** Alarm yang membangunkan CPU bila wake lock ternyata dicabut sistem. */
+    private void scheduleAlarm() {
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + ALARM_MS, watchdogIntent());
+    }
+
+    private void cancelAlarm() {
+        AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+        am.cancel(watchdogIntent());
     }
 
     @Override
     public void onSensorChanged(SensorEvent e) {
         int type = e.sensor.getType();
         if (type == Sensor.TYPE_ACCELEROMETER) {
-            if (SystemClock.elapsedRealtime() < ignoreUntil) {
+            long now = SystemClock.elapsedRealtime();
+            lastAccelMs = now;
+            Diag.lastAccelMs = now;
+            Diag.accelCount++;
+            if (now < ignoreUntil) {
                 knock.reset();
                 return;
             }
             if (prefs.pocketGuard() && wave.isNear()) {
+                Diag.pocketBlocked++;
+                if (!pocketLogged) {
+                    pocketLogged = true;
+                    Diag.log("POCKET guard memblokir ketukan (sensor jarak = dekat)");
+                }
                 knock.reset();
                 return;
             }
             knock.onSample(e.values[0], e.values[1], e.values[2], e.timestamp);
         } else if (type == Sensor.TYPE_PROXIMITY) {
+            Diag.log("PROX " + e.values[0]);
             wave.onValue(e.values[0], e.sensor.getMaximumRange(), SystemClock.elapsedRealtime());
         }
     }
@@ -199,12 +314,18 @@ public class WakeService extends Service implements SensorEventListener,
 
     @Override
     public void onDoubleKnock() {
-        if (prefs.knock()) wakeScreen();
+        if (prefs.knock()) {
+            Diag.log("WAKE oleh ketukan");
+            wakeScreen();
+        }
     }
 
     @Override
     public void onDoubleWave() {
-        if (prefs.wave()) wakeScreen();
+        if (prefs.wave()) {
+            Diag.log("WAKE oleh lambaian");
+            wakeScreen();
+        }
     }
 
     // ----------------------------------------------------------------- aksi

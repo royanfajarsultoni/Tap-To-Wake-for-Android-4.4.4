@@ -10,6 +10,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.text.Html;
 import android.view.Gravity;
 import android.view.View;
@@ -31,6 +32,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
     private TextView sensLabel;
     private TextView testView;
     private TextView adminView;
+    private TextView diagView;
     private int taps;
     private int doubles;
     private float lastJerk;
@@ -52,6 +54,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
     protected void onResume() {
         super.onResume();
         refreshAdminStatus();
+        refreshDiag();
         testDetector.reset();
         if (accel != null) sm.registerListener(this, accel, SensorManager.SENSOR_DELAY_GAME);
     }
@@ -108,6 +111,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         buildWakeCard();
         buildControlCard();
         buildTipsCard();
+        buildDiagCard();
 
         setContentView(root);
     }
@@ -120,7 +124,7 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         TextView title = UiKit.label(this, "TAP//WAKE", 30f, UiKit.CYAN, true);
         title.setLayoutParams(new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        TextView ver = UiKit.label(this, "v1.1", 12f, UiKit.MAGENTA, true);
+        TextView ver = UiKit.label(this, "v1.1.1", 12f, UiKit.MAGENTA, true);
         row.addView(title);
         row.addView(ver);
         content.addView(row);
@@ -245,6 +249,32 @@ public class MainActivity extends Activity implements SensorEventListener, Knock
         t.setLineSpacing(dp(3), 1f);
         card.addView(t);
         content.addView(card);
+    }
+
+    private void buildDiagCard() {
+        LinearLayout card = UiKit.card(this, "DIAG_LOG");
+        diagView = UiKit.label(this, "", 11f, UiKit.DIM, false);
+        card.addView(diagView);
+        card.addView(UiKit.button(this, "DIAG :: REFRESH", UiKit.CYAN,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        refreshDiag();
+                    }
+                }));
+        content.addView(card);
+    }
+
+    private void refreshDiag() {
+        long now = SystemClock.elapsedRealtime();
+        String age = Diag.lastAccelMs == 0 ? "-" : ((now - Diag.lastAccelMs) / 1000) + "s";
+        diagView.setText("listening=" + Diag.listening
+                + "  accel=" + Diag.accelCount + " (terakhir " + age + " lalu)\n"
+                + "restart=" + Diag.restarts
+                + "  lockRefresh=" + Diag.lockRefreshes
+                + "  lockHilang=" + Diag.lockLost
+                + "  blokirSaku=" + Diag.pocketBlocked + "\n"
+                + "----\n" + Diag.tail(18));
     }
 
     private void updateSensLabel(int p) {

@@ -10,8 +10,8 @@ android {
         applicationId 'com.royan.taptowake'
         minSdk 19      // Android 4.4 KitKat
         targetSdk 19   // sengaja 19: perilaku izin KitKat, tanpa runtime permission
-        versionCode 2
-        versionName '1.1'
+        versionCode 3
+        versionName '1.1.1'
     }
 
     buildTypes {
